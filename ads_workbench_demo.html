@@ -76317,6 +76317,7 @@ function strategyTreeToggle(key){
  }
  strategyRefresh();
 }
+function strategyMetricSort(key){const s=strategyContext(),old=s.metricSort||{};s.metricSort={key,dir:old.key!==key?'desc':old.dir==='desc'?'asc':old.dir==='asc'?'none':'desc'};strategyRefresh();}
 function strategyChoose(id){strategyContext().activeStrategy=id;strategyRefresh();}
 function strategyOpenLogs(){
  const s=strategyContext(),id=s.activeStrategy||s.strategies[0].id,st=s.strategies.find(x=>x.id===id);
@@ -76347,8 +76348,20 @@ renderStrategyDemo=function(){
  const filterMeta=htmlEsc(JSON.stringify({key:filterKey,end:String(filterBoard.ledger_last_date||filterBoard.input_until||filterBoard.generated_at||'').slice(0,10),days:Number(filterBoard.ledger_span_days)||365,campaigns:{},currency:'$'}));
  const filterBar=`<div class="demo-ad-management strategy-shared-filters" id="demo-ad-management" data-strategy-filters data-management="${filterMeta}">${demoSharedAdFilters()}</div>`;
  const pending=s.approvals.filter(x=>x.strategy===id&&x.status==='pending');
- const needs=camps.filter(c=>pending.some(x=>x.campaignId===String(c.campaign_id)));
- const other=camps.filter(c=>!needs.includes(c));
+ s.metricSort ||= {key:'cost',dir:'desc'};
+ const sortValue=(c,key)=>{
+   const endpoint=String(filterBoard.ledger_last_date||filterBoard.input_until||filterBoard.generated_at).slice(0,10),end=demoDayTime(endpoint),first=end-((Number(filterBoard.ledger_span_days)||365)-1)*demoDay;
+   const metrics=[c.wall,c.w30,c.w7].map(w=>w?[w.clicks||0,w.orders||0,w.cost||0,w.sales||0,w.imp||0]:null);
+   const range=activeFilters?{key:'custom',start:demoDayTime(activeFilters.start),end:demoDayTime(activeFilters.end)}:{key:'7',start:end-6*demoDay,end};
+   const html=demoManagementMetrics(metrics,range,first,end,'$');
+   const cells=[...html.matchAll(/<span>(.*?)<\/span>/g)].map(m=>m[1]);
+   const position={cost:0,imp:1,clicks:2,orders:3,cpa:4,acos:5,cvr:6,cpc:7,sales:8}[key],text=cells[position];
+   if(!text||text==='—')return null;
+   return Number(text.replace(/[$,%]/g,''));
+ };
+ const order=list=>s.metricSort.dir==='none'?list:[...list].sort((a,b)=>{const av=sortValue(a,s.metricSort.key),bv=sortValue(b,s.metricSort.key);return av==null?1:bv==null?-1:(av-bv)*(s.metricSort.dir==='desc'?-1:1);});
+ const needs=order(camps.filter(c=>pending.some(x=>x.campaignId===String(c.campaign_id))));
+ const other=order(camps.filter(c=>!needs.includes(c)));
  const money=x=>'$'+Number(x||0).toFixed(2),pct=x=>x==null?'—':(x*100).toFixed(1)+'%';
  s.treeOpen ||= {};
  const board=DEMO.payloads['US_'+s.asin]?.ad_campaign_board||{};
@@ -76360,27 +76373,28 @@ renderStrategyDemo=function(){
    return {__cells:html};
  };
  const metricCells=w=>w.__cells?w.__cells.replaceAll('<span>','<td>').replaceAll('</span>','</td>'):`<td>${money(w.cost)}</td><td>${Number(w.imp||0).toLocaleString()}</td><td>${w.clicks||0}</td><td>${w.orders||0}</td><td>${money(w.sales)}</td><td>${pct(w.clicks?(w.orders||0)/w.clicks:null)}</td><td>${pct(w.sales?(w.cost||0)/w.sales:null)}</td><td>${w.clicks?money(w.cost/w.clicks):'—'}</td><td>${w.orders?money(w.cost/w.orders):'—'}</td>`;
+ const orderedMetricCells=w=>{const html=metricCells(w),cells=html.match(/<td>.*?<\/td>/g)||[];return [0,1,2,3,8,6,5,7,4].map(i=>cells[i]||'<td>—</td>').join('');};
  const toggle=(key,label,open,level)=>`<button class="strategy-tree-toggle" aria-expanded="${open}" style="margin-left:${level*18}px" onclick="strategyTreeToggle('${key}')"><span class="strategy-tree-arrow">${open?'▾':'▸'}</span>${sx(label)}</button>`;
  const aggregate=children=>{
    const entity={};for(const win of ['wall','w30','w7']){entity[win]={};for(const field of ['cost','imp','clicks','orders','sales'])entity[win][field]=children.reduce((n,x)=>n+Number(x[win]?.[field]||0),0);}return selectedMetrics(entity);
  };
- const table=(items,action)=>`<div class="strategy-compare-scroll"><table class="strategy-compare-table ${action?'strategy-table-actions':'strategy-table-readonly'}"><colgroup>${[320,64,80,80,60,60,100,72,72,76,76,...(action?[130]:[])].map(width=>`<col style="width:${width}px">`).join('')}</colgroup><thead><tr>${['广告活动 / 广告组 / 关键词 · 投放','状态','花费','曝光量','点击','订单','广告销售额','CVR','ACoS','CPC','CPA',...(action?['操作']:[])].map(x=>`<th>${x}</th>`).join('')}</tr></thead><tbody>${items.map(c=>{
+ const table=(items,action)=>`<div class="strategy-compare-scroll"><table class="strategy-compare-table ${action?'strategy-table-actions':'strategy-table-readonly'}"><colgroup>${[320,64,80,80,60,60,76,72,72,76,100,...(action?[130]:[])].map(width=>`<col style="width:${width}px">`).join('')}</colgroup><thead><tr>${['广告活动 / 广告组 / 关键词 · 投放','状态','花费','曝光量','点击','订单','CPA','ACoS','CVR','CPC','广告销售额',...(action?['操作']:[])].map((x,i)=>{const key=[null,null,'cost','imp','clicks','orders','cpa','acos','cvr','cpc','sales'][i];return `<th>${key?`<button class="metric-sort-button" onclick="strategyMetricSort('${key}')">${x} ${s.metricSort.key===key?({desc:'↓',asc:'↑',none:'↕'}[s.metricSort.dir]):'↕'}</button>`:x}</th>`;}).join('')}</tr></thead><tbody>${items.map(c=>{
    const cid=String(c.campaign_id),key='c'+cid,open=!!s.treeOpen[key],w=selectedMetrics(c),actions=pending.filter(x=>x.campaignId===cid);
    const controls=action?`<button class="strategy-primary" onclick="strategyCampaignApprove('${cid}')">审批执行${actions.length>1?'（'+actions.length+'）':''}</button><button onclick="strategyCampaignReject('${cid}')">驳回</button>`:'—';
-   let html=`<tr class="strategy-tree-campaign"><td>${toggle(key,c.name,open,0)}${action?actions.map(x=>`<div class="strategy-row-reason"><b>${sx(x.action)}</b> · ${sx(x.target)}<p>${sx(x.evidence)}</p><span>当前：${strategyValue(x,x.current)} → 建议：${strategyValue(x,x.suggested)}</span></div>`).join(''):''}</td><td>${sx(demoCampaignStates[c.state]||c.state)}</td>${metricCells(w)}${action?`<td>${controls}</td>`:''}</tr>`;
+   let html=`<tr class="strategy-tree-campaign"><td>${toggle(key,c.name,open,0)}${action?actions.map(x=>`<div class="strategy-row-reason"><b>${sx(x.action)}</b> · ${sx(x.target)}<p>${sx(x.evidence)}</p><span class="strategy-value-change">当前：${strategyValue(x,x.current)} → 建议：${strategyValue(x,x.suggested)}</span></div>`).join(''):''}</td><td>${sx(demoCampaignStates[c.state]||c.state)}</td>${orderedMetricCells(w)}${action?`<td>${controls}</td>`:''}</tr>`;
    if(!open)return html;
    const groups=new Map();for(const child of c.children||[]){const gid=String(child.ag||'default');if(!groups.has(gid))groups.set(gid,[]);groups.get(gid).push(child);}
    for(const [gid,children] of groups){
      const groupKey='g'+cid+'_'+gid,groupOpen=!!s.treeOpen[groupKey],group=board.ad_groups?.[gid]||{};
-     html+=`<tr class="strategy-tree-group"><td>${toggle(groupKey,'广告组 · '+(group.name||gid),groupOpen,1)}</td><td>${sx(demoCampaignStates[group.state]||'启用')}</td>${metricCells(aggregate(children))}${action?'<td>—</td>':''}</tr>`;
+     html+=`<tr class="strategy-tree-group"><td>${toggle(groupKey,'广告组 · '+(group.name||gid),groupOpen,1)}</td><td>${sx(demoCampaignStates[group.state]||'启用')}</td>${orderedMetricCells(aggregate(children))}${action?'<td>—</td>':''}</tr>`;
      if(groupOpen)for(const child of children){
        const label=String(child.label||'').replace(/^asinSameAs=/,''),matched=actions.filter(x=>x.target.toLowerCase()===label.toLowerCase());
-       html+=`<tr class="strategy-tree-entry"><td><div class="strategy-tree-leaf"><span>${sx(child.badge||'投放')}</span> ${sx(label)}</div></td><td>${sx(demoCampaignStates[child.state]||child.state||'—')}</td>${metricCells(selectedMetrics(child))}${action?`<td>${matched.length?`<button onclick="demoManagementMeasureDialog(strategyContext().approvals.find(x=>x.id==='${matched[0].id}'),strategyRefresh)">审批执行</button>`:'—'}</td>`:''}</tr>`;
+       html+=`<tr class="strategy-tree-entry"><td><div class="strategy-tree-leaf"><span>${sx(child.badge||'投放')}</span> ${sx(label)}</div></td><td>${sx(demoCampaignStates[child.state]||child.state||'—')}</td>${orderedMetricCells(selectedMetrics(child))}${action?`<td>${matched.length?`<button onclick="demoManagementMeasureDialog(strategyContext().approvals.find(x=>x.id==='${matched[0].id}'),strategyRefresh)">审批执行</button>`:'—'}</td>`:''}</tr>`;
      }
    }
    return html;
  }).join('')||'<tr><td colspan="12" class="strategy-empty">暂无广告活动</td></tr>'}</tbody></table></div>`;
- return `${filterBar}<section id="demo-strategy-blocks" class="strategy-demo strategy-workspace"><aside class="strategy-left-tabs" role="tablist" aria-label="策略选择"><h3>策略积木</h3>${s.strategies.map(x=>`<button role="tab" aria-selected="${id===x.id}" class="${id===x.id?'active':''}" onclick="strategyChoose('${x.id}')"><strong>${sx(x.name)}</strong><p>${sx(x.description)}</p><span>${modeLabel[x.mode]} · ${s.approvals.filter(a=>a.strategy===x.id&&a.status==='pending').length} 项待处理</span></button>`).join('')}</aside><main class="strategy-right"><header class="strategy-workspace-head"><div><h2>${sx(st.name)}</h2><p>所选日期表现 · 查看建议并确认操作</p></div><div><select aria-label="策略执行方式" onchange="strategyMode('${id}',this.value)">${Object.entries(modeLabel).map(([k,v])=>`<option value="${k}" ${st.mode===k?'selected':''}>${v}</option>`).join('')}</select><button onclick="strategyOpenConfig('${id}')">参数配置</button><button onclick="strategyOpenLogs()">执行日志</button></div></header>${s.notice?`<div class="strategy-notice">${sx(s.notice)}</div>`:''}<section class="strategy-campaign-section"><h3>待调整广告活动 <span>${needs.length}</span></h3>${table(needs,true)}</section><section class="strategy-campaign-section"><h3>暂不调整广告活动 <span>${other.length}</span></h3>${table(other,false)}</section></main></section>`;
+ return `${filterBar}<section id="demo-strategy-blocks" class="strategy-demo strategy-workspace"><aside class="strategy-left-tabs" role="tablist" aria-label="策略选择"><h3>策略积木</h3>${s.strategies.map(x=>`<button role="tab" aria-selected="${id===x.id}" class="${id===x.id?'active':''}" onclick="strategyChoose('${x.id}')"><strong class="strategy-tab-title">${sx(x.name)}<span class="strategy-help" tabindex="0" role="img" aria-label="${sx(x.description)}" data-tooltip="${sx(x.description)}"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="1.5"/><path d="M9.6 9a2.4 2.4 0 0 1 4.7.7c0 1.7-2.3 1.8-2.3 3.3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><circle cx="12" cy="16.5" r=".85" fill="currentColor"/></svg></span></strong><span>${modeLabel[x.mode]} · ${s.approvals.filter(a=>a.strategy===x.id&&a.status==='pending').length} 项待处理</span></button>`).join('')}</aside><main class="strategy-right"><header class="strategy-workspace-head"><div><h2>${sx(st.name)}</h2></div><div><select aria-label="策略执行方式" onchange="strategyMode('${id}',this.value)">${Object.entries(modeLabel).map(([k,v])=>`<option value="${k}" ${st.mode===k?'selected':''}>${v}</option>`).join('')}</select><button onclick="strategyOpenConfig('${id}')">参数配置</button><button onclick="strategyOpenLogs()">执行日志</button></div></header>${s.notice?`<div class="strategy-notice">${sx(s.notice)}</div>`:''}<section class="strategy-campaign-section"><h3>待调整广告活动 <span>${needs.length}</span></h3>${table(needs,true)}</section><section class="strategy-campaign-section"><h3>暂不调整广告活动 <span>${other.length}</span></h3>${table(other,false)}</section></main></section>`;
 };
 renderKwlibAdRulesReviewBoard=renderStrategyDemo;
 
@@ -76578,16 +76592,42 @@ function demoMountManagement() {
       root.style.setProperty('--ck9-minw','1679px');
       form.querySelector('[data-range-caption]').innerHTML=`<span>${sx(state.start)}</span><span class="demo-date-arrow">→</span><span>${sx(state.end)}</span><span class="demo-date-icon">▦</span>`;
       form.querySelector('[data-status-caption]').textContent=state.statuses.length?'广告状态 · '+state.statuses.map(x=>demoCampaignStates[x]).join('、'):'广告状态';
-      const labels=['花费','曝光量','点击','订单','广告销售额','CVR','ACoS','CPC','CPA'];
+      const labels=['花费','曝光量','点击','订单','CPA','ACoS','CVR','CPC','广告销售额'];
+      const metricKeys=['cost','imp','clicks','orders','cpa','acos','cvr','cpc','sales'];
+      state.metricSort ||= {key:'cost',dir:'desc'};
       for(const header of root.querySelectorAll('.ck-head9,.ck-hdr9,.ck-head-cols9')){
         if(header.children.length<12)continue;
-        const cell=header.children[7];cell.classList.add('demo-single-metrics');cell.innerHTML=labels.map(x=>`<span>${x}</span>`).join('');
+        const cell=header.children[7];cell.classList.add('demo-single-metrics');cell.innerHTML=labels.map((x,i)=>`<button type="button" class="metric-sort-button" data-metric-sort="${metricKeys[i]}">${x} ${state.metricSort.key===metricKeys[i]?({desc:'↓',asc:'↑',none:'↕'}[state.metricSort.dir]):'↕'}</button>`).join('');
+        cell.querySelectorAll('[data-metric-sort]').forEach(button=>button.onclick=()=>{const key=button.dataset.metricSort,old=state.metricSort;state.metricSort={key,dir:old.key!==key?'desc':old.dir==='desc'?'asc':old.dir==='asc'?'none':'desc'};update();});
         header.children[8].hidden=true;header.children[9].hidden=true;
       }
       for(const row of rows){
         const cell=row.el.children[7];if(!cell)continue;
         cell.classList.add('demo-single-metrics');cell.innerHTML=demoManagementMetrics(row.metrics,period,first,end,meta.currency);
         row.el.children[8].hidden=true;row.el.children[9].hidden=true;
+      }
+      if(!root.hasAttribute('data-strategy-filters')){
+        const buckets=new Map();
+        const fixtureCampaigns=DEMO.payloads['US_'+String(S.sel||'').split('::').pop()]?.ad_campaign_board?.campaigns||[];
+        campaignRows.forEach((r,index)=>{
+          r.originalOrder??=index;
+          const parent=r.el.parentElement;
+          if(!r.sortCategory){
+            const c=fixtureCampaigns.find(c=>String(c.campaign_id)===r.id);
+            const kind=c?.targeting_type==='auto'?'auto':(c?.children||[]).some(x=>String(x.label||'').includes('Category'))?'cat':(c?.children||[]).some(x=>x.kind==='keyword')?'kw':'asin';
+            r.sortCategory=(c?.layer||'unknown')+':'+kind;
+          }
+          if(!buckets.has(parent))buckets.set(parent,new Map());
+          const categories=buckets.get(parent);if(!categories.has(r.sortCategory))categories.set(r.sortCategory,[]);categories.get(r.sortCategory).push(r);
+        });
+        const value=r=>{const v=r.metrics?.[1];if(!v)return null;const [clicks,orders,cost,sales,imp]=v;return ({cost,imp,clicks,orders,sales,cpa:orders?cost/orders:null,acos:sales?cost/sales:null,cvr:clicks?orders/clicks:null,cpc:clicks?cost/clicks:null})[state.metricSort.key];};
+        for(const [parent,categories] of buckets)for(const list of categories.values()){
+          // Reorder only the existing slots of this category, never the surrounding category headings.
+          const slots=list.map(row=>{const marker=document.createComment('campaign-slot');parent.insertBefore(marker,row.el);return marker;});
+          slots.sort((a,b)=>a.compareDocumentPosition(b)&Node.DOCUMENT_POSITION_FOLLOWING?-1:1);
+          const sorted=[...list].sort((a,b)=>{if(state.metricSort.dir==='none')return a.originalOrder-b.originalOrder;const av=value(a),bv=value(b);return av==null?1:bv==null?-1:(av-bv)*(state.metricSort.dir==='desc'?-1:1)||a.originalOrder-b.originalOrder;});
+          sorted.forEach((row,index)=>{const slot=slots[index];parent.insertBefore(row.el,slot);if(row.kids)parent.insertBefore(row.kids,slot);});slots.forEach(slot=>slot.remove());
+        }
       }
       const count=filters();
       note.textContent='';
@@ -76612,9 +76652,9 @@ function demoMountManagement() {
       form.querySelector('.demo-range-picker').open=false;
       update();
     });
-    form.querySelector('[data-reset-period]').onclick=()=>{Object.assign(state,defaults());syncForm();update();};
+    form.querySelector('[data-reset-period]').onclick=()=>{const reset=defaults();input('start').value=reset.start;input('end').value=reset.end;pickingEnd=false;calendarMonth=new Date(reset.start+'T00:00:00Z');calendarMonth.setUTCDate(1);drawCalendar();};
     form.querySelectorAll('[data-range-preset]').forEach(button=>button.onclick=()=>{
-      const key=button.dataset.rangePreset;state.start=key==='all'?demoDate(first):demoDate(end-(Number(key)-1)*demoDay);state.end=meta.end;state.mode='custom';syncForm();update();form.querySelector('.demo-range-picker').open=false;
+      const key=button.dataset.rangePreset;input('start').value=key==='all'?demoDate(first):demoDate(end-(Number(key)-1)*demoDay);input('end').value=meta.end;pickingEnd=false;calendarMonth=new Date(input('start').value+'T00:00:00Z');calendarMonth.setUTCDate(1);drawCalendar();
     });
     state.sites ||= ['US'];
     const sitePicker=form.querySelector('.demo-site-picker');
@@ -76646,10 +76686,11 @@ function demoMountManagement() {
       form.querySelector('[data-site-caption]').textContent=labels.length===1?siteInputs.find(x=>x.checked).dataset.region+' · '+labels[0]:labels.length?'已选 '+labels.length+' 个站点':'选择站点';
       sitePicker.open=false;update();
     };
-    sitePicker.addEventListener('toggle',()=>{if(sitePicker.open){restoreSites();form.querySelector('.demo-range-picker').open=false;form.querySelector('.demo-status-picker').open=false;}});
+    sitePicker.addEventListener('toggle',()=>{if(sitePicker.open){restoreSites();form.querySelector('.demo-status-picker').open=false;}});
     let calendarMonth=new Date(state.end+'T00:00:00Z');calendarMonth=new Date(Date.UTC(calendarMonth.getUTCFullYear(),calendarMonth.getUTCMonth(),1));
     let pickingEnd=false;
     const calendar=form.querySelector('[data-calendar]');
+    form.querySelector('[data-range-caption]').addEventListener('click',event=>{if(form.querySelector('.demo-range-picker').open)event.preventDefault();});
     function drawCalendar(){
       calendar.innerHTML=[0,1].map(offset=>{
         const base=new Date(Date.UTC(calendarMonth.getUTCFullYear(),calendarMonth.getUTCMonth()+offset,1));
@@ -76670,8 +76711,8 @@ function demoMountManagement() {
       drawCalendar();
     };
     form.querySelector('.demo-range-picker').addEventListener('toggle',()=>{if(form.querySelector('.demo-range-picker').open){pickingEnd=false;drawCalendar();form.querySelector('.demo-status-picker').open=false;}});
-    form.querySelector('.demo-status-picker').addEventListener('toggle',()=>{if(form.querySelector('.demo-status-picker').open)form.querySelector('.demo-range-picker').open=false;});
-    document.addEventListener('click',event=>{if(!root.isConnected)return;for(const picker of form.querySelectorAll('details'))if(!picker.contains(event.target))picker.open=false;});
+    form.querySelector('.demo-status-picker').addEventListener('toggle',()=>{if(form.querySelector('.demo-status-picker').open){}});
+    document.addEventListener('click',event=>{if(!root.isConnected)return;const path=event.composedPath();for(const picker of form.querySelectorAll('details')){if(picker.classList.contains('demo-range-picker'))continue;if(!path.includes(picker))picker.open=false;}});
     // A single scrolling ancestor per layer; nested horizontal scrollers break sticky columns.
     for(const card of root.querySelectorAll('.ck-card9')){
       card.style.setProperty('overflow','auto','important');
@@ -76785,7 +76826,7 @@ function demoManagementMetrics(metrics,period,first,end,currency){
   if(!values)return '<span>—</span>'.repeat(9);
   const [clicks,orders,cost,sales,imp]=values;
   const money=x=>currency+Number(x).toFixed(2),pct=(n,d)=>d?(100*n/d).toFixed(2)+'%':'—';
-  return [money(cost),Math.round(imp||0).toLocaleString(),Math.round(clicks).toLocaleString(),Math.round(orders).toLocaleString(),money(sales),pct(orders,clicks),pct(cost,sales),clicks?money(cost/clicks):'—',orders?money(cost/orders):'—'].map(v=>`<span>${v}</span>`).join('');
+  return [money(cost),Math.round(imp||0).toLocaleString(),Math.round(clicks).toLocaleString(),Math.round(orders).toLocaleString(),orders?money(cost/orders):'—',pct(cost,sales),pct(orders,clicks),clicks?money(cost/clicks):'—',money(sales)].map(v=>`<span>${v}</span>`).join('');
 }
 
 initSpLayout();
@@ -80773,7 +80814,7 @@ dialog.strategy-config-dialog{position:fixed!important;inset:0!important;margin:
 #demo-ad-management .demo-inline-money input{width:5.5ch!important;min-width:5.5ch!important;flex:0 0 5.5ch}
 #demo-ad-management .demo-inline-money{width:82px;min-width:82px;padding-left:4px;padding-right:21px}
 </style><style id="strategy-workspace-layout">
-#demo-strategy-blocks.strategy-workspace{display:grid;grid-template-columns:minmax(150px,20%) minmax(0,1fr);gap:16px;align-items:start;background:#f8fafc;padding:14px;border-radius:10px}
+#demo-strategy-blocks.strategy-workspace{display:grid;grid-template-columns:minmax(140px,calc(15% - 10px)) minmax(0,1fr);gap:16px;align-items:start;background:#f8fafc;padding:14px;border-radius:10px}
 #demo-strategy-blocks .strategy-left-tabs{background:white;border:1px solid #e2e8f0;border-radius:8px;padding:12px;display:flex;flex-direction:column;gap:8px}
 #demo-strategy-blocks .strategy-left-tabs h3{margin:0 0 6px}
 #demo-strategy-blocks .strategy-left-tabs>button{display:block;text-align:left;white-space:normal;padding:14px;border:1px solid #e2e8f0;border-radius:7px;background:white;cursor:pointer}
@@ -80849,5 +80890,14 @@ dialog.strategy-config-dialog{position:fixed!important;inset:0!important;margin:
 #demo-ad-management [data-camp-head]>div:nth-child(2){display:flex!important;align-items:center!important;justify-content:flex-start!important;text-align:left!important;align-self:stretch!important;padding:7px 0!important;margin:0!important;line-height:20px!important;text-indent:0!important}
 #demo-ad-management [data-camp-head]>div:nth-child(2)>*{margin:0!important;vertical-align:middle!important}
 </style><style>.strategy-shared-filters{margin-bottom:12px}.strategy-shared-filters .demo-action-filter{display:none!important}</style>
+<style id="strategy-tab-help-ui">
+#demo-strategy-blocks .strategy-left-tabs{padding:10px;gap:6px;overflow:visible}
+#demo-strategy-blocks .strategy-left-tabs>button{padding:11px 9px;overflow:visible}
+#demo-strategy-blocks .strategy-tab-title{display:flex;align-items:center;gap:5px;flex-wrap:wrap;margin-bottom:6px}
+#demo-strategy-blocks .strategy-help{position:relative;display:inline-flex;align-items:center;justify-content:center;flex:0 0 15px;width:15px;height:15px;border:1px solid #94a3b8;border-radius:50%;color:#64748b;line-height:1!important;font-size:11px!important;font-weight:400;cursor:help;outline-offset:3px}
+#demo-strategy-blocks .strategy-help::after{content:attr(data-tooltip);position:absolute;left:calc(100% + 9px);top:50%;transform:translateY(-50%);width:230px;padding:9px 12px;border:1px solid #e2e8f0;border-radius:6px;background:#334155;color:white;box-shadow:0 6px 18px #0f172a26;white-space:normal;text-align:left;font-size:12px;line-height:1.6;font-weight:400;visibility:hidden;opacity:0;pointer-events:none;z-index:100}
+#demo-strategy-blocks .strategy-help:hover::after,#demo-strategy-blocks .strategy-help:focus::after{visibility:visible;opacity:1}
+</style><style id="strategy-help-icon-refine">#demo-strategy-blocks .strategy-help{border:0;width:18px;height:18px;flex-basis:18px;border-radius:5px;color:#94a3b8;background:transparent;transition:color .15s,background .15s}#demo-strategy-blocks .strategy-help svg{display:block;width:15px;height:15px;flex:none}#demo-strategy-blocks .strategy-help:hover,#demo-strategy-blocks .strategy-help:focus{color:#475569;background:#e2e8f0}</style>
+<style id="metric-column-sorting">.metric-sort-button{cursor:pointer!important;border:0!important;background:transparent!important;padding:0!important;min-height:0!important;color:inherit!important;font:inherit!important;white-space:nowrap;text-align:right}#demo-ad-management .demo-single-metrics>.metric-sort-button{padding:0 7px!important;font-size:12px!important}#demo-strategy-blocks .metric-sort-button:hover,#demo-ad-management .metric-sort-button:hover{color:#0f172a!important;text-decoration:underline}</style><style id="strategy-value-change-highlight">#demo-strategy-blocks .strategy-row-reason .strategy-value-change{display:inline-block;color:#dc2626!important;font-weight:600!important;margin-top:3px}</style>
 </body>
 </html>
